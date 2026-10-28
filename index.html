@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>을지로·종각 점심줄</title>
+<meta name="description" content="을지로3가·종각역 점심 식당의 예상 혼잡도와 서울시 실시간 도시데이터 권역 인구">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+html{color-scheme:light}
+img{max-width:100%}
+[hidden]{display:none!important}
+body{margin:0}
+/* Layout: 지하철 안내판 같은 상단 띠(지금 시각·피크 상태) → 요약 → 약도 → 식당 행 목록. 상태는 색 띠와 알약으로 한눈에. */
+:root{
+  --bg:#f3f5f8; --surface:#ffffff; --sunk:#e8ecf2; --line:#d5dbe4;
+  --fg:#16202e; --muted:#5b6778; --accent:#1f4fd8; --accent-ink:#ffffff;
+  --water:#9cc3ea; --road:#c9d1dc;
+  --l0:#1a8a4a; --l1:#c98a06; --l2:#e0581f; --l3:#c21d3a; --closed:#8b94a3;
+  --l0-bg:#e3f4ea; --l1-bg:#fbf0d6; --l2-bg:#fde6dc; --l3-bg:#fadde3; --closed-bg:#eceff3;
+  --f-display:"Black Han Sans","IBM Plex Sans KR",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141c; --surface:#171e29; --sunk:#1e2734; --line:#2b3545;
+  --fg:#e7ecf3; --muted:#9aa6b8; --accent:#6f95ff; --accent-ink:#0b1020;
+  --water:#27486b; --road:#334052;
+  --l0:#4fcb85; --l1:#f0b93a; --l2:#ff8a57; --l3:#ff5f7a; --closed:#7d8798;
+  --l0-bg:#14301f; --l1-bg:#352a0e; --l2-bg:#3a2015; --l3-bg:#3a1520; --closed-bg:#222a36;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141c; --surface:#171e29; --sunk:#1e2734; --line:#2b3545;
+  --fg:#e7ecf3; --muted:#9aa6b8; --accent:#6f95ff; --accent-ink:#0b1020;
+  --water:#27486b; --road:#334052;
+  --l0:#4fcb85; --l1:#f0b93a; --l2:#ff8a57; --l3:#ff5f7a; --closed:#7d8798;
+  --l0-bg:#14301f; --l1-bg:#352a0e; --l2-bg:#3a2015; --l3-bg:#3a1520; --closed-bg:#222a36;
+  color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.5}
+.wrap{max-width:880px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px;display:flex;flex-direction:column;gap:18px}
+h1{font-family:var(--f-display);font-weight:400;font-size:clamp(28px,6vw,40px);line-height:1.1;margin:0;letter-spacing:.01em;text-wrap:balance}
+.lines{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.ln{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-weight:700;font-size:11px;font-family:var(--f-mono)}
+.ln1{background:#0d3692}.ln2{background:#33a23d}.ln3{background:#fe5b10}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+/* status band */
+.band{background:var(--fg);color:var(--bg);border-radius:10px;padding:14px 16px;display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center}
+.band .clock{font-family:var(--f-mono);font-size:34px;font-weight:600;line-height:1;grid-row:span 2}
+.band .phase{font-weight:700;font-size:16px}
+.band .sub{font-size:13px;opacity:.75}
+.picks{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:14px}
+.picks b{font-weight:600}
+.chip-pick{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px 10px 4px 6px;display:inline-flex;gap:6px;align-items:center;cursor:pointer;font:inherit;color:inherit}
+.chip-pick:hover{border-color:var(--accent)}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.seg{display:inline-flex;background:var(--sunk);border-radius:8px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:500;padding:6px 10px;border-radius:6px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.timebox{display:flex;align-items:center;gap:10px;flex:1 1 260px;min-width:0}
+.timebox input{flex:1;min-width:0;accent-color:var(--accent)}
+.timebox .tlabel{font-family:var(--f-mono);font-size:14px;min-width:4.6em;text-align:right}
+.btn-now{border:1px solid var(--line);background:var(--surface);color:var(--fg);font:inherit;font-size:12px;padding:4px 10px;border-radius:6px;cursor:pointer}
+.btn-now[disabled]{opacity:.45;cursor:default}
+/* map */
+.mapbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mapbox svg{display:block;width:100%;height:auto}
+.maplegend{display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+.maplegend span{display:inline-flex;gap:5px;align-items:center}
+.mdot{cursor:pointer}
+.mdot:focus{outline:none}
+.mdot:focus-visible circle.ring{stroke:var(--accent);stroke-width:3}
+/* list */
+.list{display:flex;flex-direction:column;gap:8px}
+.row{background:var(--surface);border:1px solid var(--line);border-radius:10px;border-left:5px solid var(--c);overflow:hidden}
+.row-head{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:12px 14px;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;cursor:pointer}
+.row-head:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.nm{font-weight:700;font-size:16px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;min-width:0}
+.nm small{font-weight:400;font-size:13px;color:var(--muted)}
+.meta{grid-column:1;font-size:13px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.right{grid-row:1 / span 2;grid-column:2;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.pill{font-size:13px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--cbg);color:var(--c);white-space:nowrap}
+.live{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--accent);display:inline-flex;align-items:center;gap:4px}
+.live::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.spark{display:block}
+.detail{padding:0 14px 14px;display:flex;flex-direction:column;gap:12px;border-top:1px dashed var(--line);padding-top:12px}
+.facts{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
+.facts dt{color:var(--muted)} .facts dd{margin:0}
+.report{display:flex;flex-direction:column;gap:8px}
+.report h3{font-size:13px;margin:0;font-weight:600}
+.rbtns{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.rbtns button{border:1px solid var(--line);background:var(--sunk);color:var(--fg);font:inherit;font-size:13px;padding:8px 4px;border-radius:8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px}
+.rbtns button:hover:not([disabled]){border-color:var(--c2)}
+.rbtns button .dot{width:8px;height:8px}
+.rbtns button[disabled]{opacity:.5;cursor:default}
+.rlog{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px}
+.note{font-size:12px;color:var(--muted)}
+/* area strip */
+.areas{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}
+.area{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.area .an{font-weight:600;font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.area .ap{font-size:12px;color:var(--muted)}
+.area .fc{display:flex;gap:4px;align-items:flex-end}
+.area .fc span{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:var(--muted);font-family:var(--f-mono)}
+.area .fc i{display:block;width:100%;border-radius:3px}
+.areahead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.areahead h2{font-size:14px;margin:0;font-weight:600}
+.foot{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:6px;max-width:68ch}
+.foot h2{font-size:13px;color:var(--fg);margin:0}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;z-index:20}
+@media (max-width:520px){
+  .band .clock{font-size:28px}
+  .rbtns{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (prefers-reduced-motion:no-preference){.row,.pill{transition:border-color .3s}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:6px">
+    <div class="lines"><span class="ln ln1">1</span><span>종각</span><span class="ln ln2">2</span><span class="ln ln3">3</span><span>을지로3가</span></div>
+    <h1>을지로·종각 점심줄</h1>
+  </header>
+
+  <section class="band" aria-live="polite">
+    <div class="clock" id="clock">--:--</div>
+    <div class="phase" id="phase">불러오는 중</div>
+    <div class="sub" id="phaseSub"></div>
+  </section>
+
+  <section class="picks" id="picks"></section>
+
+  <section class="controls">
+    <div class="seg" role="group" aria-label="지역">
+      <button id="a-all" data-area="all" aria-pressed="true">전체</button>
+      <button id="a-jg" data-area="jonggak" aria-pressed="false">종각</button>
+      <button id="a-e3" data-area="euljiro3" aria-pressed="false">을지로3가</button>
+      <button id="a-e4" data-area="euljiro4" aria-pressed="false">을지로4가</button>
+    </div>
+    <div class="seg" role="group" aria-label="정렬">
+      <button id="s-calm" data-sort="calm" aria-pressed="true">한산한 순</button>
+      <button id="s-busy" data-sort="busy" aria-pressed="false">붐비는 순</button>
+    </div>
+    <div class="timebox">
+      <label for="tslider" class="muted" style="font-size:13px;white-space:nowrap">시간 미리보기</label>
+      <input type="range" id="tslider" min="630" max="870" step="5">
+      <span class="tlabel" id="tlabel">지금</span>
+      <button class="btn-now" id="btnNow" disabled>지금</button>
+    </div>
+  </section>
+
+  <section class="mapbox">
+    <svg id="map" viewBox="0 0 640 420" role="img" aria-label="종각·을지로 일대 약도와 식당 혼잡도"></svg>
+    <div class="maplegend">
+      <span><i class="dot" style="background:var(--l0)"></i>여유</span>
+      <span><i class="dot" style="background:var(--l1)"></i>보통</span>
+      <span><i class="dot" style="background:var(--l2)"></i>붐빔</span>
+      <span><i class="dot" style="background:var(--l3)"></i>매우 붐빔</span>
+      <span><i class="dot" style="background:var(--closed)"></i>영업 안 함</span>
+      <span>위치는 대략적인 약도</span>
+    </div>
+  </section>
+
+  <section>
+    <div class="areahead"><h2>주변 권역 인구 (서울시 실시간 도시데이터)</h2><span class="note" id="areaStamp">불러오는 중</span></div>
+    <div class="areas" id="areas"></div>
+  </section>
+
+  <section class="list" id="list"></section>
+
+  <footer class="foot">
+    <h2>숫자는 어떻게 나오나요</h2>
+    <p style="margin:0"><b>예상</b>은 직장가 점심 패턴(11:40 첫 물결, 12:10 정점, 12:50 두 번째 물결)에 식당별 인기도·회전율을 곱한 추정치입니다. 실제 측정값이 아닙니다.</p>
+    <p style="margin:0"><b>권역 보정</b>은 서울시 실시간 도시데이터(SKT·KT 기지국 신호 기반, 5분 집계)의 권역 혼잡도로 예상치를 올리거나 내린 값입니다. 여유 ×0.85, 보통 ×1.0, 약간 붐빔 ×1.15, 붐빔 ×1.3이고, 식당마다 가까운 권역 2곳을 거리 비중으로 섞습니다. 을지로3가는 전용 권역이 없어 종로·청계와 명동 값을 함께 씁니다. 시간 미리보기는 권역별 시간대 예측값을 사용합니다.</p>
+    <p style="margin:0">영업시간은 공개된 소개 글 기준이라 바뀌었을 수 있습니다. "영업시간 미확인" 식당은 방문 전 확인하세요.</p>
+    <p style="margin:0">권역 데이터는 GitHub Actions가 평일 낮 10분마다 받아 옵니다. 서울시 값 자체가 5분 집계·약 15분 지연이라, 화면 값은 실제보다 15~25분 전 상황입니다.</p>
+    <p style="margin:0">줄 상황 제보 기능은 준비 중입니다.</p>
+  </footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const R = [
+  {id:"sansu", name:"산수갑산", cat:"순대국·순대", area:"euljiro3", addr:"을지로20길 24", lat:37.5653, lng:126.9942, pop:.85, lunch:1, dinner:.8, wk:.35, maxWait:20,
+   hours:{days:[1,2,3,4,5,6], open:"11:30", close:"22:00", brk:["15:00","17:00"]}},
+  {id:"andong", name:"안동장", cat:"중식·굴짬뽕", area:"euljiro3", addr:"을지로 124", lat:37.5662, lng:126.9932, pop:.9, lunch:1, dinner:.6, wk:.55, maxWait:25,
+   hours:{days:[0,1,2,3,4,5,6], open:"11:30", close:"21:30", wkClose:"20:00"}},
+  {id:"pyeongrae", name:"평래옥", cat:"냉면·초계탕", area:"euljiro3", addr:"마른내로 21-1", lat:37.5645, lng:126.9912, pop:.9, lunch:1, dinner:.6, wk:.6, maxWait:25,
+   hours:{days:[0,1,2,3,4,5,6], open:"11:00", close:"21:00"}},
+  {id:"tongil", name:"통일집", cat:"한우·된장찌개", area:"euljiro3", addr:"마른내로4길 31-3", lat:37.5641, lng:126.9934, pop:.75, lunch:.9, dinner:.9, wk:0, maxWait:20,
+   hours:{days:[1,2,3,4,5], open:"11:00", close:"21:00"}},
+  {id:"donggang", name:"동강나루터", cat:"참게메기매운탕", area:"euljiro3", addr:"을지로 99", lat:37.5660, lng:126.9895, pop:.55, lunch:.8, dinner:.8, wk:.4, maxWait:10,
+   hours:{days:[1,2,3,4,5,6], open:"10:30", close:"22:00", satOpen:"11:00", satClose:"21:00"}},
+  {id:"sigol", name:"시골집", cat:"LA갈비·오징어볶음", area:"euljiro3", addr:"을지로20길 36", lat:37.5650, lng:126.9952, pop:.6, lunch:.8, dinner:.9, wk:.4, maxWait:10,
+   hours:{days:[0,1,2,3,4,5,6], open:"11:30", close:"22:00", brk:["15:00","17:00"]}},
+  {id:"jeonju", name:"전주집", cat:"삼겹살", area:"euljiro3", addr:"수표로 48-18", lat:37.5676, lng:126.9907, pop:.5, lunch:.6, dinner:1, wk:.4, maxWait:10,
+   hours:{days:[1,2,3,4,5,6], open:"11:00", close:"22:00", brk:["14:30","16:00"]}},
+  {id:"golmok", name:"을지로 골목집", cat:"곱도리탕", area:"euljiro3", addr:"수표로 48-3", lat:37.5671, lng:126.9901, pop:.55, lunch:.6, dinner:1, wk:.5, maxWait:15,
+   hours:{days:[0,1,2,3,4,5,6], open:"11:30", close:"23:00", brk:["15:00","16:00"]}},
+  {id:"chosun", name:"조선옥", cat:"연탄 소갈비", area:"euljiro3", addr:"을지로3가 일대", lat:37.5668, lng:126.9922, pop:.6, lunch:.6, dinner:.9, wk:.5, maxWait:15, hours:null},
+  {id:"woolae", name:"우래옥", cat:"평양냉면·불고기", area:"euljiro4", addr:"을지로4가역 인근", lat:37.5683, lng:126.9983, pop:1, lunch:1, dinner:.7, wk:.95, maxWait:40, hours:null},
+  {id:"jinjung", name:"진중 우육면관", cat:"우육면", area:"jonggak", addr:"종로7길 29-14", lat:37.5718, lng:126.9866, pop:1, lunch:1, dinner:.6, wk:.8, maxWait:35, hours:null},
+  {id:"cheongjin", name:"청진옥", cat:"해장국", area:"jonggak", addr:"종로3길 32", lat:37.5713, lng:126.9807, pop:.8, lunch:1, dinner:.5, wk:.5, maxWait:20, hours:null},
+  {id:"imun", name:"이문설농탕", cat:"설렁탕", area:"jonggak", addr:"견지동", lat:37.5731, lng:126.9839, pop:.85, lunch:1, dinner:.4, wk:.6, maxWait:20, hours:null},
+  {id:"nyeok", name:"녁", cat:"이탈리안", area:"jonggak", addr:"우정국로2길 8, 4층", lat:37.5699, lng:126.9846, pop:.5, lunch:.7, dinner:.8, wk:.5, maxWait:10, hours:null},
+];
+const AREA = {jonggak:"종각", euljiro3:"을지로3가", euljiro4:"을지로4가"};
+const LV = [
+  {name:"여유", c:"--l0", bg:"--l0-bg"},
+  {name:"보통", c:"--l1", bg:"--l1-bg"},
+  {name:"붐빔", c:"--l2", bg:"--l2-bg"},
+  {name:"매우 붐빔", c:"--l3", bg:"--l3-bg"},
+];
+const REPORT = [
+  {label:"자리 있음", score:15, wait:"바로 입장"},
+  {label:"조금 대기", score:48, wait:"대기 5분 안팎"},
+  {label:"줄 김", score:74, wait:"대기 10~20분"},
+  {label:"매우 긴 줄", score:93, wait:"대기 20분 이상"},
+];
+const LIVE_WINDOW = 40; // minutes
+// 식당 → 서울시 도시데이터 권역(POI) 비중
+const AREA_SRC = {
+  jonggak:  {POI010:.6, POI006:.4},   // 보신각 · 종로·청계 관광특구
+  euljiro3: {POI006:.5, POI003:.5},   // 종로·청계 · 명동 관광특구 (을지로 전용 권역 없음)
+  euljiro4: {POI006:.6, POI002:.4},   // 종로·청계 · 동대문 관광특구
+};
+const LVL_FACTOR = {"여유":.85, "보통":1, "약간 붐빔":1.15, "붐빔":1.3};
+const LVL_IDX = {"여유":0, "보통":1, "약간 붐빔":2, "붐빔":3};
+const AREA_STALE_MIN = 90;
+const state = {area:"all", sort:"calm", preview:null, open:null, reports:[], areas:null, areasAt:0, dbStatus:"loading"};
+
+const $ = s => document.querySelector(s);
+const toMin = s => { const [h,m] = s.split(":").map(Number); return h*60+m; };
+const fmt = m => { m = ((m%1440)+1440)%1440; return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); };
+const g = (t,mu,s) => Math.exp(-0.5*((t-mu)/s)**2);
+
+function nowKST(){
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US",{timeZone:"Asia/Seoul",weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date()).map(x=>[x.type,x.value]));
+  const dow = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].indexOf(p.weekday);
+  return {dow, min: Number(p.hour)*60+Number(p.minute)};
+}
+
+// 0..1 demand curve
+function demand(r, dow, t){
+  const weekend = dow===0 || dow===6;
+  const office = 0.38*g(t,700,14) + 1.0*g(t,732,19) + 0.62*g(t,770,17) + 0.16*g(t,805,20);
+  const lunch = weekend ? 0.75*g(t,750,45)*r.wk : office*r.lunch;
+  const dinner = 0.8*g(t,1120,50)*r.dinner*(weekend?0.8:1);
+  return Math.min(1, Math.max(lunch, dinner));
+}
+
+function hoursState(r, dow, t){
+  const h = r.hours;
+  if(!h) return {st:"unknown"};
+  if(!h.days.includes(dow)) return {st:"closed", why:"오늘 휴무"};
+  const weekend = dow===0 || dow===6;
+  let open = toMin(dow===6 && h.satOpen ? h.satOpen : h.open);
+  let close = toMin(dow===6 && h.satClose ? h.satClose : (weekend && h.wkClose ? h.wkClose : h.close));
+  if(t < open) return {st:"closed", why:`${fmt(open)} 오픈`};
+  if(t >= close) return {st:"closed", why:"영업 종료"};
+  if(h.brk){ const b0=toMin(h.brk[0]), b1=toMin(h.brk[1]); if(t>=b0 && t<b1) return {st:"closed", why:`브레이크 ~${fmt(b1)}`}; }
+  return {st:"open", label:`${fmt(open)}–${fmt(close)}${h.brk?` (브레이크 ${h.brk[0]}–${h.brk[1]})`:""}`};
+}
+
+function estScore(r, dow, t){ return Math.round(Math.min(100, demand(r,dow,t)*r.pop*100)); }
+
+// 권역 혼잡 등급: 지금이면 현재값(신선할 때), 아니면 해당 시각 예측값
+function areaLevel(code, ctx){
+  const a = state.areas && state.areas[code]; if(!a) return null;
+  const fresh = state.areasAt && (Date.now()-state.areasAt) < AREA_STALE_MIN*60000;
+  if(ctx.isNow && fresh && a.lvl in LVL_FACTOR) return {lvl:a.lvl, src:"now"};
+  const hh = String(Math.floor(ctx.t/60)).padStart(2,"0");
+  const f = (a.fcst||[]).find(x => x.t && x.t.slice(11,13)===hh);
+  if(f && f.lvl in LVL_FACTOR) return {lvl:f.lvl, src:"fcst"};
+  if(ctx.isNow && a.lvl in LVL_FACTOR) return {lvl:a.lvl, src:"stale"};
+  return null;
+}
+function areaFactor(r, ctx){
+  const src = AREA_SRC[r.area]; if(!src) return {f:1, parts:[]};
+  let F=0, W=0; const parts=[];
+  for(const code in src){ const al = areaLevel(code, ctx); if(!al) continue; const w=src[code]; F += w*LVL_FACTOR[al.lvl]; W += w; parts.push({code, nm:(state.areas[code].nm||code).replace(" 관광특구",""), lvl:al.lvl, src:al.src}); }
+  return {f: W? F/W : 1, parts};
+}
+function levelOf(s){ return s<35?0:s<60?1:s<80?2:3; }
+
+function liveFor(r, nowMs){
+  const rs = state.reports.filter(x => x.r===r.id && nowMs - x.t >= -120000 && nowMs - x.t <= LIVE_WINDOW*60000);
+  if(!rs.length) return null;
+  let W=0, S=0;
+  for(const x of rs){ const age=Math.max(0,(nowMs-x.t)/60000); const w=Math.exp(-age/15); W+=w; S+=w*REPORT[x.lv].score; }
+  const latest = rs.reduce((a,b)=> a.t>b.t?a:b);
+  return {score:S/W, weight:W, count:rs.length, latest, ageMin:Math.max(0,Math.round((nowMs-latest.t)/60000))};
+}
+
+function compute(r, ctx){
+  const hs = hoursState(r, ctx.dow, ctx.t);
+  const base = estScore(r, ctx.dow, ctx.t);
+  const af = areaFactor(r, ctx);
+  const est = Math.round(Math.min(100, base*af.f));
+  let score = est, live = null;
+  if(ctx.isNow){ live = liveFor(r, Date.now()); if(live){ score = Math.round((live.weight*live.score + 0.4*est)/(live.weight+0.4)); } }
+  const closed = hs.st==="closed" && !(live && live.ageMin<=15);
+  const lv = levelOf(score);
+  let wait;
+  if(closed) wait = hs.why;
+  else if(live) wait = REPORT[live.latest.lv].wait + ` · ${live.ageMin===0?"방금":live.ageMin+"분 전"} 제보`;
+  else { const w = Math.round(Math.max(0,(score-50)/50)*r.maxWait/5)*5; wait = w===0 ? "바로 입장 예상" : `대기 약 ${w}분 예상`; }
+  // next calm time (lunch window, from t forward)
+  let calm = null;
+  if(!closed && lv>=2){ for(let m=ctx.t+5; m<=870; m+=5){ if(hoursState(r,ctx.dow,m).st==="closed") continue; if(estScore(r,ctx.dow,m)<40){ calm=m; break; } } }
+  return {r, hs, base, af, est, score, live, closed, lv, wait, calm};
+}
+
+function renderAreas(ctx){
+  const el = $("#areas"), st = $("#areaStamp");
+  if(!state.areas){ el.innerHTML = `<div class="area"><span class="ap">권역 데이터가 아직 없어요. 들어오면 식당 예상치에 자동 반영됩니다.</span></div>`; st.textContent = state.dbStatus==="loading"?"불러오는 중":"데이터 없음"; return; }
+  const codes = ["POI010","POI006","POI003","POI002"].filter(c=>state.areas[c]);
+  const ageMin = state.areasAt ? Math.round((Date.now()-state.areasAt)/60000) : null;
+  const first = state.areas[codes[0]];
+  st.textContent = (first && first.time ? first.time.slice(11)+" 집계" : "") + (ageMin!=null ? ` · ${ageMin<1?"방금":ageMin<60?ageMin+"분 전":Math.round(ageMin/60)+"시간 전"} 수신` : "") + (ageMin>AREA_STALE_MIN?" · 오래돼서 예측값 사용":"");
+  el.innerHTML = codes.map(c=>{
+    const a = state.areas[c]; const li = LVL_IDX[a.lvl] ?? 1; const col = LV[li].c, bg = LV[li].bg;
+    const hours = [11,12,13,14];
+    const fc = hours.map(h=>{ const f=(a.fcst||[]).find(x=>x.t && Number(x.t.slice(11,13))===h); const i = f? (LVL_IDX[f.lvl] ?? 1) : null; return `<span><i style="height:${i==null?4:8+i*6}px;background:${i==null?"var(--line)":"var("+LV[i].c+")"}"></i>${h}시</span>`; }).join("");
+    return `<div class="area" style="--c:var(${col});--cbg:var(${bg})">
+      <div class="an"><span>${a.nm}</span><span class="pill">${a.lvl}</span></div>
+      <div class="ap mono">${Number(a.min).toLocaleString()}–${Number(a.max).toLocaleString()}명</div>
+      <div class="fc">${fc}</div>
+    </div>`;
+  }).join("");
+}
+
+function ctxNow(){
+  const k = nowKST();
+  if(state.preview==null) return {dow:k.dow, t:k.min, isNow:true};
+  return {dow:k.dow, t:state.preview, isNow:false};
+}
+
+function sparkline(r, ctx, color){
+  const W=128, H=30, t0=660, t1=840;
+  const pts=[]; for(let m=t0; m<=t1; m+=5){ const x=(m-t0)/(t1-t0)*W; const y=H-2-(estScore(r,ctx.dow,m)/100)*(H-4); pts.push([x,y]); }
+  const line = pts.map((p,i)=>(i?"L":"M")+p[0].toFixed(1)+","+p[1].toFixed(1)).join("");
+  const area = line + `L${W},${H}L0,${H}Z`;
+  let mark="";
+  if(ctx.t>=t0 && ctx.t<=t1){ const x=(ctx.t-t0)/(t1-t0)*W; const y=H-2-(estScore(r,ctx.dow,ctx.t)/100)*(H-4);
+    mark=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="0" y2="${H}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 2"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(${color})"/>`; }
+  const tick = m => (m-t0)/(t1-t0)*W;
+  return `<svg class="spark" width="${W}" height="${H+12}" viewBox="0 0 ${W} ${H+12}" aria-hidden="true">
+    <line x1="${tick(720)}" x2="${tick(720)}" y1="0" y2="${H}" stroke="var(--line)" stroke-width="1"/>
+    <line x1="${tick(780)}" x2="${tick(780)}" y1="0" y2="${H}" stroke="var(--line)" stroke-width="1"/>
+    <path d="${area}" fill="var(${color})" fill-opacity=".14"/><path d="${line}" fill="none" stroke="var(${color})" stroke-width="1.6"/>${mark}
+    <text x="0" y="${H+10}" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">11</text>
+    <text x="${tick(720)-5}" y="${H+10}" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">12</text>
+    <text x="${tick(780)-5}" y="${H+10}" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">13</text>
+    <text x="${W-10}" y="${H+10}" font-size="9" fill="var(--muted)" font-family="IBM Plex Mono,monospace">14</text></svg>`;
+}
+
+// ---- map ----
+const B = {minLat:37.5630, maxLat:37.5742, minLng:126.9790, maxLng:127.0000, W:640, H:420};
+const P = (lat,lng) => [ (lng-B.minLng)/(B.maxLng-B.minLng)*B.W, (B.maxLat-lat)/(B.maxLat-B.minLat)*B.H ];
+const poly = pts => pts.map((p,i)=>{const [x,y]=P(p[0],p[1]); return (i?"L":"M")+x.toFixed(1)+","+y.toFixed(1);}).join("");
+const STATIONS = [
+  {n:"종각", lat:37.5702, lng:126.9830, c:"#0d3692"},
+  {n:"을지로입구", lat:37.5660, lng:126.9826, c:"#33a23d"},
+  {n:"을지로3가", lat:37.5663, lng:126.9917, c:"#33a23d"},
+  {n:"을지로4가", lat:37.5667, lng:126.9980, c:"#33a23d"},
+];
+function drawMap(items){
+  const roads = `
+    <path d="${poly([[37.5690,126.979],[37.5688,126.984],[37.5687,126.990],[37.5689,126.995],[37.5692,127.000]])}" stroke="var(--water)" stroke-width="9" fill="none" stroke-linecap="round"/>
+    <path d="${poly([[37.5699,126.979],[37.5702,126.983],[37.5714,126.992],[37.5711,127.000]])}" stroke="var(--road)" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <path d="${poly([[37.5658,126.979],[37.5660,126.9826],[37.5663,126.9917],[37.5667,126.998],[37.5668,127.000]])}" stroke="var(--road)" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <path d="${poly([[37.5742,126.9879],[37.5700,126.9880],[37.5630,126.9884]])}" stroke="var(--road)" stroke-width="5" fill="none"/>
+    <path d="${poly([[37.5742,126.9840],[37.5702,126.9838]])}" stroke="var(--road)" stroke-width="3" fill="none"/>
+    <path d="${poly([[37.5646,126.984],[37.5644,126.992],[37.5643,126.999]])}" stroke="var(--road)" stroke-width="3" fill="none"/>`;
+  const lbl = (txt,lat,lng,dx=0,dy=0,anchor="start") => { const [x,y]=P(lat,lng); return `<text x="${(x+dx).toFixed(1)}" y="${(y+dy).toFixed(1)}" font-size="11" fill="var(--muted)" text-anchor="${anchor}" font-family="IBM Plex Sans KR,sans-serif">${txt}</text>`; };
+  const labels = lbl("종로",37.5706,126.9800,0,-8) + lbl("청계천",37.5690,126.9800,0,-8) + lbl("을지로",37.5659,126.9800,0,-8) + lbl("삼일대로",37.5735,126.9883,4,0) + lbl("마른내로",37.5645,126.9965,0,-7);
+  const st = STATIONS.map(s=>{ const [x,y]=P(s.lat,s.lng); return `<g><rect x="${x-7}" y="${y-7}" width="14" height="14" rx="3" fill="var(--surface)" stroke="${s.c}" stroke-width="2.5"/><text x="${x}" y="${y+21}" font-size="11" font-weight="600" fill="var(--fg)" text-anchor="middle" font-family="IBM Plex Sans KR,sans-serif">${s.n}</text></g>`; }).join("");
+  const dots = items.map(it=>{
+    const [x,y]=P(it.r.lat,it.r.lng); const col = it.closed?"--closed":LV[it.lv].c; const sel = state.open===it.r.id;
+    return `<g class="mdot" tabindex="0" role="button" data-id="${it.r.id}" aria-label="${it.r.name} ${it.closed?"영업 안 함":LV[it.lv].name}">
+      <title>${it.r.name} · ${it.closed?it.hs.why:LV[it.lv].name}</title>
+      <circle class="ring" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${sel?13:10}" fill="var(--surface)" stroke="var(${col})" stroke-width="${sel?3:2}"/>
+      <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${sel?8:6}" fill="var(${col})"/>
+      ${it.live?`<circle cx="${(x+8).toFixed(1)}" cy="${(y-8).toFixed(1)}" r="3.5" fill="var(--accent)"/>`:""}
+      ${sel?`<g><rect x="${(x-4- it.r.name.length*7).toFixed(1)}" y="${(y-36).toFixed(1)}" width="${(it.r.name.length*14+8).toFixed(1)}" height="20" rx="4" fill="var(--fg)"/><text x="${x.toFixed(1)}" y="${(y-22).toFixed(1)}" font-size="12" font-weight="700" fill="var(--bg)" text-anchor="middle" font-family="IBM Plex Sans KR,sans-serif">${it.r.name}</text></g>`:""}
+    </g>`;
+  }).join("");
+  $("#map").innerHTML = `<rect width="640" height="420" fill="var(--sunk)" opacity=".5"/>${roads}${labels}${st}${dots}`;
+}
+
+// ---- render ----
+function render(){
+  const k = nowKST(); const ctx = ctxNow();
+  $("#clock").textContent = fmt(ctx.t);
+  const weekend = ctx.dow===0||ctx.dow===6;
+  let phase, sub;
+  const t = ctx.t;
+  if(weekend){ phase = "주말이라 직장인 점심 러시는 없어요"; sub = "관광객이 몰리는 냉면·우육면집 위주로 붐빕니다"; }
+  else if(t<690){ phase = "점심 러시 전"; sub = `첫 물결(11:40)까지 ${700-t>0?700-t+"분":"곧"}`; }
+  else if(t<720){ phase = "첫 물결이 들어오는 중"; sub = "12시 전에 들어가면 대기가 짧아요"; }
+  else if(t<760){ phase = "점심 피크"; sub = "12:10 전후가 가장 붐빕니다"; }
+  else if(t<790){ phase = "두 번째 물결"; sub = "13:00 넘으면 빠르게 풀려요"; }
+  else if(t<840){ phase = "점심 끝물"; sub = "대부분 바로 입장 가능"; }
+  else { phase = "점심시간 아님"; sub = "미리보기 슬라이더로 점심시간 예상을 볼 수 있어요"; }
+  if(!ctx.isNow) phase = `${fmt(t)} 예상 · ` + phase;
+  if(state.areas){
+    const al6 = areaLevel("POI006", ctx), al10 = areaLevel("POI010", ctx), al3 = areaLevel("POI003", ctx);
+    const bits = [al10&&`보신각 ${al10.lvl}`, al6&&`종로·청계 ${al6.lvl}`, al3&&`명동 ${al3.lvl}`].filter(Boolean);
+    if(bits.length) sub += ` · 권역: ${bits.join(", ")}`;
+  }
+  $("#phase").textContent = phase; $("#phaseSub").textContent = sub;
+
+  renderAreas(ctx);
+  const items = R.map(r=>compute(r,ctx));
+  const shown = items.filter(it=> state.area==="all" || it.r.area===state.area);
+  shown.sort((a,b)=>{
+    if(a.closed!==b.closed) return a.closed?1:-1;
+    return state.sort==="calm" ? a.score-b.score : b.score-a.score;
+  });
+
+  // picks
+  const openOnes = items.filter(it=>!it.closed).sort((a,b)=>a.score-b.score).slice(0,3);
+  $("#picks").innerHTML = openOnes.length
+    ? `<b>${ctx.isNow?"지금":fmt(t)} 덜 붐비는 곳</b>` + openOnes.map(it=>`<button class="chip-pick" data-id="${it.r.id}"><i class="dot" style="background:var(${LV[it.lv].c})"></i>${it.r.name}<span class="muted" style="font-size:12px">${AREA[it.r.area]}</span></button>`).join("")
+    : `<b>지금 영업 중으로 확인된 곳이 없어요</b>`;
+
+  drawMap(items);
+
+  const nowMs = Date.now();
+  $("#list").innerHTML = shown.map(it=>{
+    const r = it.r; const col = it.closed?"--closed":LV[it.lv].c; const bg = it.closed?"--closed-bg":LV[it.lv].bg;
+    const open = state.open===r.id;
+    const status = it.closed ? "영업 안 함" : LV[it.lv].name;
+    return `<article class="row" id="row-${r.id}" style="--c:var(${col});--cbg:var(${bg})">
+      <button class="row-head" data-id="${r.id}" aria-expanded="${open}">
+        <div class="nm">${r.name}<small>${r.cat}</small></div>
+        <div class="right">
+          <span class="pill">${status}</span>
+          <span style="font-size:11px" class="muted">${it.af.parts.length?"권역 보정 예상":"예상"}</span>
+        </div>
+        <div class="meta"><span>${AREA[r.area]}</span><span>·</span><span>${it.wait}</span>${it.calm?`<span>·</span><span>${fmt(it.calm)}쯤 한산</span>`:""}${it.af.parts.length?`<span>·</span><span>${it.af.parts.map(p=>`${p.nm} ${p.lvl}`).join(" / ")}</span>`:""}</div>
+      </button>
+      ${open?`<div class="detail">
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between">
+          <dl class="facts">
+            <dt>주소</dt><dd>${r.addr}</dd>
+            <dt>영업</dt><dd>${it.hs.st==="unknown"?"영업시간 미확인":it.hs.st==="open"?it.hs.label:it.hs.why}</dd>
+            <dt>기본 예상</dt><dd class="mono">${it.base}/100</dd>
+            ${it.af.parts.length?`<dt>권역 보정</dt><dd class="mono">×${it.af.f.toFixed(2)} → ${it.est}/100</dd>`:""}
+            ${it.live?`<dt>제보 반영</dt><dd class="mono">${it.score}/100</dd>`:""}
+          </dl>
+          <div><div class="note" style="margin-bottom:2px">11–14시 예상 곡선</div>${sparkline(r,ctx,col)}</div>
+        </div>
+      </div>`:""}
+    </article>`;
+  }).join("");
+
+  // time controls
+  $("#tlabel").textContent = ctx.isNow ? "지금" : fmt(state.preview);
+  $("#btnNow").disabled = ctx.isNow;
+  if(ctx.isNow) $("#tslider").value = Math.min(870, Math.max(630, k.min));
+}
+
+// ---- events ----
+document.addEventListener("click", e=>{
+  const a = e.target.closest("[data-area]"); if(a){ state.area=a.dataset.area; document.querySelectorAll("[data-area]").forEach(b=>b.setAttribute("aria-pressed", b===a)); render(); return; }
+  const s = e.target.closest("[data-sort]"); if(s){ state.sort=s.dataset.sort; document.querySelectorAll("[data-sort]").forEach(b=>b.setAttribute("aria-pressed", b===s)); render(); return; }
+  const h = e.target.closest(".row-head"); if(h){ state.open = state.open===h.dataset.id?null:h.dataset.id; render(); return; }
+  const m = e.target.closest(".mdot,.chip-pick"); if(m){ openRow(m.dataset.id); }
+});
+document.addEventListener("keydown", e=>{ const m=e.target.closest&&e.target.closest(".mdot"); if(m && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openRow(m.dataset.id); } });
+function openRow(id){
+  const r = R.find(x=>x.id===id);
+  if(state.area!=="all" && r.area!==state.area){ state.area="all"; document.querySelectorAll("[data-area]").forEach(b=>b.setAttribute("aria-pressed", b.dataset.area==="all")); }
+  state.open=id; render();
+  const el=document.getElementById("row-"+id); if(el) el.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth", block:"center"});
+}
+$("#tslider").addEventListener("input", e=>{ state.preview=Number(e.target.value); render(); });
+$("#btnNow").addEventListener("click", ()=>{ state.preview=null; render(); });
+
+render();
+setInterval(render, 60000);
+
+// ---- 권역 데이터 (GitHub Actions가 갱신하는 data/latest.json) ----
+async function loadAreas(){
+  try{
+    const r = await fetch("data/latest.json?t="+Math.floor(Date.now()/60000), {cache:"no-store"});
+    if(!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    if(d && d.areas && typeof d.areas==="object"){ state.areas = d.areas; state.areasAt = Number(d.fetchedAt)||0; state.dbStatus="ready"; }
+    else { state.dbStatus="off"; }
+  }catch(e){ state.dbStatus = state.areas ? "ready" : "error"; }
+  render();
+}
+loadAreas();
+setInterval(loadAreas, 5*60000);
+</script>
+</body>
+</html>
