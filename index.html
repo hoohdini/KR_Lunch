@@ -110,6 +110,22 @@ h1{font-family:var(--f-display);font-weight:400;font-size:clamp(28px,6vw,40px);l
 .area .fc i{display:block;width:100%;border-radius:3px}
 .areahead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
 .areahead h2{font-size:14px;margin:0;font-weight:600}
+/* search */
+.search{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.search input[type=search]{width:100%;font:inherit;font-size:15px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--fg)}
+.search input[type=search]:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{border:1px solid var(--line);background:var(--sunk);color:var(--muted);font:inherit;font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer}
+.chips button[aria-pressed="true"]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.hits{display:flex;flex-direction:column;gap:4px}
+.hit{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 10px;border-radius:8px;border:1px solid transparent;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;width:100%}
+.hit:hover,.hit:focus-visible{border-color:var(--line);background:var(--bg);outline:none}
+.hit .hn{font-weight:600;font-size:14px}
+.hit .hn small{font-weight:400;color:var(--muted);margin-left:6px;font-size:12px}
+.hit .ha{grid-column:1;font-size:12px;color:var(--muted)}
+.hit .hp{grid-row:1 / span 2;grid-column:2;align-self:center;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.hit .pill{font-size:12px}
+.hit .tag{font-size:10px;color:var(--accent);font-weight:700;letter-spacing:.04em}
 .foot{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:6px;max-width:68ch}
 .foot h2{font-size:13px;color:var(--fg);margin:0}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--fg);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:14px;z-index:20}
@@ -173,6 +189,14 @@ h1{font-family:var(--f-display);font-weight:400;font-size:clamp(28px,6vw,40px);l
   </section>
 
   <section class="list" id="list"></section>
+
+  <section class="search" id="search">
+    <div class="areahead"><h2>이 동네 식당 전부 찾기</h2><span class="note" id="allStamp">목록 불러오는 중</span></div>
+    <input type="search" id="q" placeholder="상호나 메뉴로 검색 (예: 칼국수, 설렁탕, 초밥)" autocomplete="off" aria-label="식당 검색">
+    <div class="chips" id="cats" role="group" aria-label="업태"></div>
+    <div class="hits" id="hits"></div>
+    <p class="note" style="margin:0">서울시 일반음식점 인허가 정보에서 영업 중으로 신고된 가게입니다. 상세 예측이 붙은 곳은 <b>확인됨</b> 표시가 있고, 나머지는 주변 권역 인구만으로 혼잡 정도를 보여줍니다. 영업시간·휴무는 직접 확인하세요.</p>
+  </section>
 
   <footer class="foot">
     <h2>숫자는 어떻게 나오나요</h2>
@@ -268,7 +292,14 @@ const BASE_MIN_DAYS = 3;        // 평소 대비 보정을 쓰기 시작하는 �
 const RATIO_EXP = 0.8, RATIO_LO = 0.7, RATIO_HI = 1.45;  // 평소 대비 비율 → 보정 계수
 const LVL_IDX = {"여유":0, "보통":1, "약간 붐빔":2, "붐빔":3};
 const AREA_STALE_MIN = 90;
-const state = {area:"all", sort:"calm", preview:null, open:null, reports:[], areas:null, areasAt:0, dbStatus:"loading"};
+const state = {area:"all", sort:"calm", preview:null, open:null, reports:[], areas:null, areasAt:0, dbStatus:"loading", all:null, allStatus:"loading", q:"", cat:"all", hits:[]};
+// 전수 목록의 식당을 가까운 역 기준 구역으로 배정
+const ANCHORS = [
+  {area:"jonggak", lat:37.5702, lng:126.9830}, {area:"euljiroipgu", lat:37.5660, lng:126.9826},
+  {area:"euljiro3", lat:37.5663, lng:126.9917}, {area:"euljiro4", lat:37.5667, lng:126.9980},
+];
+const CAT_GROUPS = [["all","전체"],["한식","한식"],["중국식","중식"],["일식","일식"],["분식","분식"],["경양식","양식"],["횟집","횟집"],["etc","기타"]];
+const CAT_MAIN = new Set(["한식","중국식","일식","분식","경양식","횟집"]);
 
 const $ = s => document.querySelector(s);
 const toMin = s => { const [h,m] = s.split(":").map(Number); return h*60+m; };
@@ -452,7 +483,9 @@ function drawMap(items){
       ${sel?`<g><rect x="${(x-4- it.r.name.length*7).toFixed(1)}" y="${(y-36).toFixed(1)}" width="${(it.r.name.length*14+8).toFixed(1)}" height="20" rx="4" fill="var(--fg)"/><text x="${x.toFixed(1)}" y="${(y-22).toFixed(1)}" font-size="12" font-weight="700" fill="var(--bg)" text-anchor="middle" font-family="IBM Plex Sans KR,sans-serif">${it.r.name}</text></g>`:""}
     </g>`;
   }).join("");
-  $("#map").innerHTML = `<rect width="640" height="420" fill="var(--sunk)" opacity=".5"/>${roads}${labels}${st}${dots}`;
+  // 검색 결과(확인되지 않은 가게)는 작은 점으로
+  const hitDots = (state.q || state.cat!=="all") ? state.hits.filter(h=>!h.curated).map(h=>{ const [x,y]=P(h.lat,h.lng); if(x<0||x>B.W||y<0||y>B.H) return ""; return `<g class="mdot" tabindex="0" role="button" data-hit="${h.id}" aria-label="${h.n}"><title>${h.n} · ${h.c}</title><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="var(--accent)" fill-opacity=".85" stroke="var(--surface)" stroke-width="1.5"/></g>`; }).join("") : "";
+  $("#map").innerHTML = `<rect width="640" height="420" fill="var(--sunk)" opacity=".5"/>${roads}${labels}${st}${hitDots}${dots}`;
 }
 
 // ---- render ----
@@ -523,6 +556,8 @@ function render(){
     </article>`;
   }).join("");
 
+  renderSearch(ctx);
+
   // time controls
   $("#tlabel").textContent = ctx.isNow ? "지금" : fmt(state.preview);
   $("#btnNow").disabled = ctx.isNow;
@@ -533,10 +568,13 @@ function render(){
 document.addEventListener("click", e=>{
   const a = e.target.closest("[data-area]"); if(a){ state.area=a.dataset.area; document.querySelectorAll("[data-area]").forEach(b=>b.setAttribute("aria-pressed", b===a)); render(); return; }
   const s = e.target.closest("[data-sort]"); if(s){ state.sort=s.dataset.sort; document.querySelectorAll("[data-sort]").forEach(b=>b.setAttribute("aria-pressed", b===s)); render(); return; }
+  const c = e.target.closest("[data-cat]"); if(c){ state.cat=c.dataset.cat; runSearch(); render(); return; }
+  const ht = e.target.closest("[data-hit]"); if(ht){ const r = state.all && state.all.find(x=>x.id===ht.dataset.hit); if(r && r.curated) openRow(r.curated); else if(r){ state.q = r.n; $("#q").value = r.n; runSearch(); render(); $("#map").scrollIntoView({behavior:"smooth", block:"center"}); } return; }
   const h = e.target.closest(".row-head"); if(h){ state.open = state.open===h.dataset.id?null:h.dataset.id; render(); return; }
-  const m = e.target.closest(".mdot,.chip-pick"); if(m){ openRow(m.dataset.id); }
+  const m = e.target.closest(".mdot,.chip-pick"); if(m && m.dataset.id){ openRow(m.dataset.id); }
 });
-document.addEventListener("keydown", e=>{ const m=e.target.closest&&e.target.closest(".mdot"); if(m && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openRow(m.dataset.id); } });
+let qT; $("#q").addEventListener("input", e=>{ clearTimeout(qT); qT=setTimeout(()=>{ state.q=e.target.value.trim(); runSearch(); render(); }, 150); });
+document.addEventListener("keydown", e=>{ const m=e.target.closest&&e.target.closest(".mdot"); if(m && m.dataset.id && (e.key==="Enter"||e.key===" ")){ e.preventDefault(); openRow(m.dataset.id); } });
 function openRow(id){
   const r = R.find(x=>x.id===id);
   if(state.area!=="all" && r.area!==state.area){ state.area="all"; document.querySelectorAll("[data-area]").forEach(b=>b.setAttribute("aria-pressed", b.dataset.area==="all")); }
@@ -548,6 +586,64 @@ $("#btnNow").addEventListener("click", ()=>{ state.preview=null; render(); });
 
 render();
 setInterval(render, 60000);
+
+// ---- 전수 식당 검색 (data/restaurants.json, 월 1회 갱신) ----
+function nearestArea(lat, lng){
+  let best=null, bd=Infinity;
+  for(const a of ANCHORS){ const d=(a.lat-lat)**2+((a.lng-lng)*0.79)**2; if(d<bd){bd=d;best=a.area;} }
+  return best;
+}
+const norm = s => (s||"").toLowerCase().replace(/\s+/g,"");
+function catGroup(c){ return CAT_MAIN.has(c) ? c : "etc"; }
+function levelFromFactor(f){ return f<0.95?0:f<1.1?1:f<1.25?2:3; }
+
+function runSearch(){
+  if(!state.all) { state.hits=[]; return; }
+  const q = norm(state.q);
+  let hits = state.all.filter(r => (state.cat==="all" || catGroup(r.c)===state.cat) && (!q || norm(r.n).includes(q) || norm(r.c).includes(q) || norm(r.a).includes(q)));
+  // 확인된 식당 우선, 그다음 이름순
+  hits.sort((a,b)=> (b.curated?1:0)-(a.curated?1:0) || a.n.localeCompare(b.n,"ko"));
+  state.hits = hits.slice(0, 60);
+  state.hitTotal = hits.length;
+}
+
+function renderSearch(ctx){
+  const st = $("#allStamp"), el = $("#hits"), cats = $("#cats");
+  if(!state.all){ el.innerHTML=""; st.textContent = state.allStatus==="loading" ? "목록 불러오는 중" : "전수 목록이 아직 없어요. 저장소의 '식당 전수 목록 갱신' 워크플로를 한 번 실행하면 채워집니다."; cats.innerHTML=""; return; }
+  st.textContent = `${state.all.length.toLocaleString()}곳 · ${state.allBuiltAt||""} 기준`;
+  if(!cats.childElementCount) cats.innerHTML = CAT_GROUPS.map(([k,l])=>`<button data-cat="${k}" aria-pressed="${state.cat===k}">${l}</button>`).join("");
+  else cats.querySelectorAll("[data-cat]").forEach(b=>b.setAttribute("aria-pressed", b.dataset.cat===state.cat));
+  if(!state.q && state.cat==="all"){ el.innerHTML = `<div class="note">검색어를 넣거나 업태를 고르면 여기에 결과가 나와요.</div>`; return; }
+  if(!state.hits.length){ el.innerHTML = `<div class="note">"${state.q}"에 맞는 가게가 없어요. 인허가 상호명이 간판과 다를 수 있으니 짧게 검색해 보세요.</div>`; return; }
+  el.innerHTML = state.hits.map(r=>{
+    const af = areaFactor({area:r.area}, ctx);
+    const lv = levelFromFactor(af.f); const col=LV[lv].c, bg=LV[lv].bg;
+    const why = af.parts.length ? `${af.parts.some(p=>p.mode==="ratio")?"평소 대비 ":""}${af.parts.map(p=>`${p.nm} ${p.label}`).join(" / ")}` : "권역 데이터 없음";
+    return `<button class="hit" data-hit="${r.id}" style="--c:var(${col});--cbg:var(${bg})">
+      <div class="hn">${r.n}<small>${r.c}</small></div>
+      <div class="ha">${r.a} · ${AREA[r.area]} · ${why}</div>
+      <div class="hp"><span class="pill">${r.curated?"상세 예측":"주변 "+LV[lv].name}</span>${r.curated?`<span class="tag">확인됨</span>`:""}</div>
+    </button>`;
+  }).join("") + (state.hitTotal>state.hits.length?`<div class="note">${state.hitTotal}곳 중 60곳만 표시. 검색어를 더 넣어 보세요.</div>`:"");
+}
+
+async function loadAll(){
+  try{
+    const r = await fetch("data/restaurants.json", {cache:"no-store"});
+    if(!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const items = (d.items||[]).map(x=>({...x, area:nearestArea(x.lat,x.lng)}));
+    // 확인된 29곳과 이름으로 연결 (좌표는 인허가 값이 더 정확하므로 덮어쓴다)
+    for(const cur of R){
+      const key = norm(cur.name).replace(/(본점|시청점|명동본점)$/,"");
+      const m = items.find(x => norm(x.n)===key || norm(x.n).startsWith(key) && x.area===cur.area);
+      if(m){ m.curated = cur.id; cur.lat = m.lat; cur.lng = m.lng; }
+    }
+    state.all = items; state.allBuiltAt = d.builtAt; state.allStatus="ready";
+  }catch(e){ state.allStatus="off"; }
+  runSearch(); render();
+}
+loadAll();
 
 // ---- 권역 데이터 (GitHub Actions가 갱신하는 data/latest.json) ----
 async function loadAreas(){

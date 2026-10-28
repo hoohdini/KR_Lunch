@@ -33,5 +33,6 @@ jobs:
             echo "변경 없음"
           else
             git commit -m "data: $(date -u +'%Y-%m-%d %H:%M') UTC 갱신"
+            git pull --rebase origin main
             git push
           fi
