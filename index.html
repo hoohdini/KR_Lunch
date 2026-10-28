@@ -176,9 +176,10 @@ h1{font-family:var(--f-display);font-weight:400;font-size:clamp(28px,6vw,40px);l
   <footer class="foot">
     <h2>숫자는 어떻게 나오나요</h2>
     <p style="margin:0"><b>예상</b>은 직장가 점심 패턴(11:40 첫 물결, 12:10 정점, 12:50 두 번째 물결)에 식당별 인기도·회전율을 곱한 추정치입니다. 실제 측정값이 아닙니다.</p>
-    <p style="margin:0"><b>권역 보정</b>은 서울시 실시간 도시데이터(SKT·KT 기지국 신호 기반, 5분 집계)의 권역 혼잡도로 예상치를 올리거나 내린 값입니다. 여유 ×0.85, 보통 ×1.0, 약간 붐빔 ×1.15, 붐빔 ×1.3이고, 식당마다 가까운 권역 2곳을 거리 비중으로 섞습니다. 을지로3가는 전용 권역이 없어 종로·청계와 명동 값을 함께 씁니다. 시간 미리보기는 권역별 시간대 예측값을 사용합니다.</p>
+    <p style="margin:0"><b>권역 보정</b>은 서울시 실시간 도시데이터(SKT·KT 기지국 신호 기반, 5분 집계)의 권역 인구로 예상치를 올리거나 내린 값입니다. 식당마다 가까운 권역 2곳을 거리 비중으로 섞고, 을지로3가는 전용 권역이 없어 종로·청계와 명동 값을 함께 씁니다. 시간 미리보기는 권역별 시간대 예측값을 사용합니다.</p>
+    <p style="margin:0"><b>평소 대비</b>는 지금 인구를 같은 요일 종류(평일/주말)·같은 시간대의 지난 날짜 중앙값으로 나눈 비율입니다. 평일 기록이 3일 이상 쌓인 권역부터 이 비율로 보정하고(+20%면 약 ×1.16, 범위 ×0.7~1.45), 그 전에는 서울시 등급(여유 ×0.85, 보통 ×1.0, 약간 붐빔 ×1.15, 붐빔 ×1.3)을 씁니다.</p>
     <p style="margin:0">영업시간은 공개된 소개 글 기준이라 바뀌었을 수 있습니다. "영업시간 미확인" 식당은 방문 전 확인하세요.</p>
-    <p style="margin:0">권역 데이터는 GitHub Actions가 평일 낮 10분마다 받아 옵니다. 서울시 값 자체가 5분 집계·약 15분 지연이라, 화면 값은 실제보다 15~25분 전 상황입니다.</p>
+    <p style="margin:0">권역 데이터는 GitHub Actions가 평일 낮 10분마다 받아 옵니다. 서울시 값 자체가 5분 집계·약 15분 지연이라, 화면 값은 실제보다 15~30분 전 상황입니다.</p>
     <p style="margin:0">줄 상황 제보 기능은 준비 중입니다.</p>
   </footer>
 </div>
@@ -230,6 +231,8 @@ const AREA_SRC = {
   euljiro4: {POI006:.6, POI002:.4},   // 종로·청계 · 동대문 관광특구
 };
 const LVL_FACTOR = {"여유":.85, "보통":1, "약간 붐빔":1.15, "붐빔":1.3};
+const BASE_MIN_DAYS = 3;        // 평소 대비 보정을 쓰기 시작하는 최소 기록 일수
+const RATIO_EXP = 0.8, RATIO_LO = 0.7, RATIO_HI = 1.45;  // 평소 대비 비율 → 보정 계수
 const LVL_IDX = {"여유":0, "보통":1, "약간 붐빔":2, "붐빔":3};
 const AREA_STALE_MIN = 90;
 const state = {area:"all", sort:"calm", preview:null, open:null, reports:[], areas:null, areasAt:0, dbStatus:"loading"};
@@ -280,10 +283,32 @@ function areaLevel(code, ctx){
   if(ctx.isNow && a.lvl in LVL_FACTOR) return {lvl:a.lvl, src:"stale"};
   return null;
 }
+// 평소 대비 비율: (지금 또는 예측 인구) ÷ (같은 요일 종류·같은 시간대의 지난 날짜 중앙값)
+function areaRatio(code, ctx){
+  const a = state.areas && state.areas[code]; const b = a && a.baseline; if(!b || !b.by_hour) return null;
+  const weekend = ctx.dow===0 || ctx.dow===6;
+  if(b.kind !== (weekend?"weekend":"weekday") || (b.n_days||0) < BASE_MIN_DAYS) return null;
+  const hh = String(Math.floor(ctx.t/60)); const base = Number(b.by_hour[hh]); if(!base) return null;
+  const fresh = state.areasAt && (Date.now()-state.areasAt) < AREA_STALE_MIN*60000;
+  let mid = null;
+  if(ctx.isNow && fresh) mid = (Number(a.min)+Number(a.max))/2;
+  else { const f = (a.fcst||[]).find(x => x.t && x.t.slice(11,13)===hh.padStart(2,"0")); if(f) mid = (Number(f.min)+Number(f.max))/2; }
+  if(!mid) return null;
+  return mid/base;
+}
+const ratioFactor = q => Math.min(RATIO_HI, Math.max(RATIO_LO, Math.pow(q, RATIO_EXP)));
+const pct = q => (q>=1?"+":"") + Math.round((q-1)*100) + "%";
+
 function areaFactor(r, ctx){
   const src = AREA_SRC[r.area]; if(!src) return {f:1, parts:[]};
   let F=0, W=0; const parts=[];
-  for(const code in src){ const al = areaLevel(code, ctx); if(!al) continue; const w=src[code]; F += w*LVL_FACTOR[al.lvl]; W += w; parts.push({code, nm:(state.areas[code].nm||code).replace(" 관광특구",""), lvl:al.lvl, src:al.src}); }
+  for(const code in src){
+    const w = src[code]; const nm = (state.areas && state.areas[code] && state.areas[code].nm || code).replace(" 관광특구","");
+    const q = areaRatio(code, ctx);
+    if(q!=null){ F += w*ratioFactor(q); W += w; parts.push({code, nm, label:pct(q), mode:"ratio"}); continue; }
+    const al = areaLevel(code, ctx); if(!al) continue;
+    F += w*LVL_FACTOR[al.lvl]; W += w; parts.push({code, nm, label:al.lvl, mode:"level"});
+  }
   return {f: W? F/W : 1, parts};
 }
 function levelOf(s){ return s<35?0:s<60?1:s<80?2:3; }
@@ -327,9 +352,12 @@ function renderAreas(ctx){
     const a = state.areas[c]; const li = LVL_IDX[a.lvl] ?? 1; const col = LV[li].c, bg = LV[li].bg;
     const hours = [11,12,13,14];
     const fc = hours.map(h=>{ const f=(a.fcst||[]).find(x=>x.t && Number(x.t.slice(11,13))===h); const i = f? (LVL_IDX[f.lvl] ?? 1) : null; return `<span><i style="height:${i==null?4:8+i*6}px;background:${i==null?"var(--line)":"var("+LV[i].c+")"}"></i>${h}시</span>`; }).join("");
+    const q = areaRatio(c, ctx); const b = a.baseline || {};
+    const baseLine = q!=null ? `평소 대비 <b>${pct(q)}</b>` : (b.n_days!=null ? `평소 기록 ${b.n_days}/${BASE_MIN_DAYS}일 쌓는 중` : "");
     return `<div class="area" style="--c:var(${col});--cbg:var(${bg})">
       <div class="an"><span>${a.nm}</span><span class="pill">${a.lvl}</span></div>
       <div class="ap mono">${Number(a.min).toLocaleString()}–${Number(a.max).toLocaleString()}명</div>
+      ${baseLine?`<div class="ap">${baseLine}</div>`:""}
       <div class="fc">${fc}</div>
     </div>`;
   }).join("");
@@ -411,7 +439,8 @@ function render(){
   if(!ctx.isNow) phase = `${fmt(t)} 예상 · ` + phase;
   if(state.areas){
     const al6 = areaLevel("POI006", ctx), al10 = areaLevel("POI010", ctx), al3 = areaLevel("POI003", ctx);
-    const bits = [al10&&`보신각 ${al10.lvl}`, al6&&`종로·청계 ${al6.lvl}`, al3&&`명동 ${al3.lvl}`].filter(Boolean);
+    const q6 = areaRatio("POI006", ctx), q10 = areaRatio("POI010", ctx), q3 = areaRatio("POI003", ctx);
+    const bits = [al10&&`보신각 ${q10!=null?pct(q10):al10.lvl}`, al6&&`종로·청계 ${q6!=null?pct(q6):al6.lvl}`, al3&&`명동 ${q3!=null?pct(q3):al3.lvl}`].filter(Boolean);
     if(bits.length) sub += ` · 권역: ${bits.join(", ")}`;
   }
   $("#phase").textContent = phase; $("#phaseSub").textContent = sub;
@@ -444,7 +473,7 @@ function render(){
           <span class="pill">${status}</span>
           <span style="font-size:11px" class="muted">${it.af.parts.length?"권역 보정 예상":"예상"}</span>
         </div>
-        <div class="meta"><span>${AREA[r.area]}</span><span>·</span><span>${it.wait}</span>${it.calm?`<span>·</span><span>${fmt(it.calm)}쯤 한산</span>`:""}${it.af.parts.length?`<span>·</span><span>${it.af.parts.map(p=>`${p.nm} ${p.lvl}`).join(" / ")}</span>`:""}</div>
+        <div class="meta"><span>${AREA[r.area]}</span><span>·</span><span>${it.wait}</span>${it.calm?`<span>·</span><span>${fmt(it.calm)}쯤 한산</span>`:""}${it.af.parts.length?`<span>·</span><span>${it.af.parts.some(p=>p.mode==="ratio")?"평소 대비 ":""}${it.af.parts.map(p=>`${p.nm} ${p.label}`).join(" / ")}</span>`:""}</div>
       </button>
       ${open?`<div class="detail">
         <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between">

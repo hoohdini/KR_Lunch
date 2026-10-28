@@ -55,6 +55,56 @@ def fetch(code: str) -> dict:
     raise RuntimeError(f"{code} failed: {last}")
 
 
+def is_weekday(dt: datetime) -> bool:
+    return dt.weekday() < 5
+
+
+def load_history() -> list[dict]:
+    rows = []
+    for p in sorted((ROOT / "data" / "history").glob("*.csv")):
+        with p.open(encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                try:
+                    dt = datetime.strptime(r["time"], "%Y-%m-%d %H:%M").replace(tzinfo=KST)
+                    rows.append({"dt": dt, "code": r["code"], "mid": (int(r["min"]) + int(r["max"])) / 2})
+                except (KeyError, ValueError):
+                    continue
+    return rows
+
+
+def median(xs: list[float]) -> float:
+    s = sorted(xs)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def baseline_for(code: str, rows: list[dict], today: datetime) -> dict:
+    """같은 요일 종류(평일/주말), 지난 날짜들의 시간대별 인구 중앙값.
+
+    오늘 값은 제외한다(오늘이 평소보다 붐비는지 보려는 것이므로).
+    시간대별로 먼저 날짜별 평균을 낸 뒤 날짜 간 중앙값을 취해, 10분 단위
+    기록이 많은 날이 과대 반영되지 않게 한다.
+    """
+    kind = "weekday" if is_weekday(today) else "weekend"
+    per_day_hour: dict[tuple[str, int], list[float]] = {}
+    for r in rows:
+        if r["code"] != code or r["dt"].date() == today.date():
+            continue
+        if (r["dt"].weekday() < 5) != (kind == "weekday"):
+            continue
+        per_day_hour.setdefault((r["dt"].strftime("%Y-%m-%d"), r["dt"].hour), []).append(r["mid"])
+    by_hour: dict[int, list[float]] = {}
+    days = set()
+    for (day, hour), vals in per_day_hour.items():
+        days.add(day)
+        by_hour.setdefault(hour, []).append(sum(vals) / len(vals))
+    return {
+        "kind": kind,
+        "n_days": len(days),
+        "by_hour": {str(h): round(median(v)) for h, v in sorted(by_hour.items())},
+    }
+
+
 def main() -> int:
     if not KEY:
         print("SEOUL_API_KEY 가 없습니다.", file=sys.stderr)
@@ -83,9 +133,6 @@ def main() -> int:
     # 일부 권역만 실패했으면 그 권역은 이전 값을 유지한다.
     merged = dict((prev.get("areas") or {}))
     merged.update(areas)
-    out = {"fetchedAt": int(time.time() * 1000), "areas": merged}
-    latest_path.parent.mkdir(parents=True, exist_ok=True)
-    latest_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     # 집계 시각이 바뀐 권역만 기록 (같은 5분 집계를 중복 저장하지 않음)
     now = datetime.now(KST)
@@ -109,7 +156,16 @@ def main() -> int:
                 w.writerow(["time", "code", "name", "level", "min", "max"])
             w.writerows(new_rows)
 
-    summary = ", ".join(f"{a['nm'].replace(' 관광특구', '')} {a['lvl']}" for a in areas.values())
+    # 평소 대비 기준선 (기록이 쌓일수록 정확해진다; 페이지는 n_days >= 3 일 때만 사용)
+    history = load_history()
+    for c, a in merged.items():
+        a["baseline"] = baseline_for(c, history, now)
+
+    out = {"fetchedAt": int(time.time() * 1000), "areas": merged}
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+
+    summary =", ".join(f"{a['nm'].replace(' 관광특구', '')} {a['lvl']}" for a in areas.values())
     print(f"{next(iter(areas.values()))['time']} 집계 — {summary}")
     if errors:
         print("일부 실패: " + " | ".join(errors), file=sys.stderr)
